@@ -71,6 +71,7 @@ header h1 small{display:block;font-family:system-ui,sans-serif;font-size:11px;le
 .radio{flex:1;display:flex;flex-direction:column;align-items:flex-start;gap:2px;margin:0;padding:10px;border:1px solid var(--line);border-radius:10px;color:var(--tx);font-size:15px;cursor:pointer}
 .radio input{width:auto;margin:0 0 4px}
 .radio small{color:var(--mut);font-size:12px}
+.radios3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.radios3 .radio{padding:10px 8px;font-size:14px;line-height:1.2}
 .radio:has(input:checked){border-color:var(--pri);background:var(--pri2)}
 .time.jogo{outline:2px solid var(--pri)}
 .time .inc{font-size:11px;color:var(--bad);font-family:system-ui,sans-serif}
@@ -1004,8 +1005,9 @@ function formDiar(){
   <label>Nome / apelido</label><input id="dNome" placeholder="Ex.: Primo do Igor">
   <label>Quem convidou</label><select id="dConv"><option value="">— ninguém / veio sozinho —</option>
     ${cv.length?`<optgroup label="Na pelada hoje">${cv.map(opt).join('')}</optgroup>`:''}${outros.length?`<optgroup label="Outros">${outros.map(opt).join('')}</optgroup>`:''}</select>
-  <label>Posição</label><div class="row" style="flex-wrap:nowrap">
+  <label>Posição</label><div class="radios3">
     <label class="radio"><input type="radio" name="dPos" value="jogador" checked> 👟 Jogador<small>paga diária ${brl(c.diaria)}</small></label>
+    <label class="radio"><input type="radio" name="dPos" value="isento"> 👟 Jogador isento<small>não paga</small></label>
     <label class="radio"><input type="radio" name="dPos" value="goleiro"> 🧤 Goleiro<small>não paga</small></label></div>
   ${botoesModal('salvaDiar()')}`);
   setTimeout(()=>{const e=document.getElementById('dNome');if(e)e.focus()},50);
@@ -1017,9 +1019,10 @@ async function salvaDiar(){
     if(!await confirma(`Já existe "${ex.apelido||ex.nome}" cadastrado. Usar ele em vez de criar outro?`,'Usar o existente'))return;
     fecha();return addPres(ex.id);
   }
-  const p=curP(),pos=(document.querySelector('input[name=dPos]:checked')||{}).value||'jogador';
+  const p=curP(),op=(document.querySelector('input[name=dPos]:checked')||{}).value||'jogador';
+  const pos=op==='goleiro'?'goleiro':'jogador';
   const j={id:uid(),nome,apelido:nome,pos,ativo:true,entrada:p.data,convidadoPor:val('dConv')||null,
-    tipos:[{desde:ym(p.data),tipo:pos==='goleiro'?'isento':'diarista'}]};
+    tipos:[{desde:ym(p.data),tipo:op==='jogador'?'diarista':'isento'}]};
   await put('jogadores',j);fecha();await addPres(j.id);
 }
 async function formaTime(){const p=curP(),f=listaEspera(p).slice(0,porTime());p.times.push(f);await put('peladas',p);render()}
@@ -1784,7 +1787,144 @@ async function salvaHorario(){
 // ----- FINANÇAS -----
 function vFin(){
   const seg=`<div class="finseg">${[['geral','📊 Geral'],['receitas','💰 Receitas'],['despesas','💸 Despesas'],['pagamentos','📅 Mensalidades mês a mês']].map(([k,l])=>`<button class="chip ${S.fin===k?'on':''}" onclick="S.fin='${k}';render()">${l}</button>`).join('')}</div>`;
-  return seg+({geral:vFinGeral,receitas:vRec,despesas:vDesp,pagamentos:vPag}[S.fin]||vFinGeral)();
+  return seg+`<button class="btn sec" style="width:100%;margin:-4px 0 12px" onclick="fotoFin()">📤 Salvar foto, PDF ou mandar no WhatsApp</button>`+({geral:vFinGeral,receitas:vRec,despesas:vDesp,pagamentos:vPag}[S.fin]||vFinGeral)();
+}
+
+// ===== relatórios de finanças em imagem (foto / PDF / WhatsApp) =====
+function novoRel(){
+  const W=1080,P=56,F='system-ui,-apple-system,Segoe UI,Roboto,sans-serif',SL="'Alfa Slab One',Georgia,serif";
+  const TX='#182c3c',MU='#6e6a5c',LN='#e3d7bd',OK='#3f6b2a',BAD='#a61c1c',WARN='#b45309',CARD='#fffaf0';
+  const mc=document.createElement('canvas').getContext('2d');
+  const quebra=(t,font,max)=>{mc.font=font;const ws=String(t).split(' '),ls=[];let l='';ws.forEach(w=>{const tt=l?l+' '+w:w;if(mc.measureText(tt).width>max&&l){ls.push(l);l=w}else l=tt});if(l)ls.push(l);return ls};
+  const ops=[];
+  const R={W,P,F,SL,TX,MU,LN,OK,BAD,WARN,CARD,ops,
+    kpis(arr){for(let i=0;i<arr.length;i+=2){const par=arr.slice(i,i+2);ops.push({h:142,f:(c,y,u)=>{const w=(W-2*P-16)/2;par.forEach(([l,v,cor],k)=>{const x=P+k*(w+16);u.rr(x,y,w,124,16,CARD);u.txt(l,x+24,y+44,`24px ${F}`,MU);u.txt(v,x+24,y+98,`44px ${SL}`,cor||TX)})}})}},
+    sec(t){ops.push({h:96,f:(c,y,u)=>{u.txt(t,P,y+56,`38px ${SL}`,TX);u.hr(y+76)}})},
+    linha(a,b,v,cor){ops.push({h:b?84:62,f:(c,y,u)=>{u.txt(u.corte(a,W-2*P-300,`bold 28px ${F}`),P+8,y+34,`bold 28px ${F}`,TX);if(b)u.txt(u.corte(b,W-2*P-300,`22px ${F}`),P+8,y+66,`22px ${F}`,MU);if(v!=null)u.txt(v,W-P-8,y+34,`bold 28px ${F}`,cor||TX,'right');u.hr(y+(b?80:58),1)}})},
+    sub(a,v,cor){ops.push({h:58,f:(c,y,u)=>{u.rr(P,y+4,W-2*P,46,10,'#ece3cf');u.txt(a,P+16,y+36,`bold 24px ${F}`,TX);if(v!=null)u.txt(v,W-P-16,y+36,`bold 24px ${F}`,cor||TX,'right')}})},
+    tabela(cols,rows){ // cols:[{t,x,al}] x = posição da coluna
+      ops.push({h:48,f:(c,y,u)=>cols.forEach(k=>u.txt(k.t,k.x,y+32,`bold 21px ${F}`,MU,k.al||'left'))});
+      rows.forEach((r,i)=>ops.push({h:54,f:(c,y,u)=>{if(r.fundo)u.rr(P,y,W-2*P,54,8,r.fundo);else if(i%2)c.fillStyle='#ece3cf',c.fillRect(P,y,W-2*P,54);r.c.forEach((v,k)=>{const o=typeof v==='object'&&v?v:{v};u.txt(String(o.v),cols[k].x,y+36,`${o.b?'bold ':''}${o.s||26}px ${F}`,o.cor||TX,cols[k].al||'left')})}}));
+    },
+    grade(ms,linhas){
+      const nx=P,cw=(W-2*P-250)/ms.length,x0=P+250;
+      ops.push({h:46,f:(c,y,u)=>ms.forEach((m,i)=>u.txt(MESES[+m.slice(5)-1].slice(0,3),x0+i*cw+cw/2,y+30,`bold 20px ${F}`,MU,'center'))});
+      const cor={ok:OK,dv:BAD,av:'#d08a1c',is:null,na:'#d6ccb4',fut:null};
+      linhas.forEach((l,i)=>ops.push({h:58,f:(c,y,u)=>{if(i%2)c.fillStyle='#ece3cf',c.fillRect(P,y,W-2*P,58);
+        u.txt(u.corte(l.nome,240,`bold 24px ${F}`),nx+8,y+28,`bold 24px ${F}`,TX);if(l.sub)u.txt(u.corte(l.sub,240,`18px ${F}`),nx+8,y+50,`18px ${F}`,MU);
+        l.cels.forEach((st,k)=>{const cx=x0+k*cw+cw/2,cy=y+29;c.beginPath();
+          if(st==='is'){c.arc(cx,cy,10,0,7);c.strokeStyle=MU;c.lineWidth=3;c.stroke()}
+          else if(st==='na'){c.arc(cx,cy,5,0,7);c.fillStyle=cor.na;c.fill()}
+          else if(cor[st]){c.arc(cx,cy,13,0,7);c.fillStyle=cor[st];c.fill()}})}}));
+      ops.push({h:60,f:(c,y,u)=>{let x=P+4;[['pago',OK,'f'],['devendo',BAD,'f'],['a vencer','#d08a1c','f'],['isento',MU,'s'],['não devia','#d6ccb4','p']].forEach(([t,k,tp])=>{c.beginPath();c.arc(x+12,y+34,tp==='p'?5:11,0,7);if(tp==='s'){c.strokeStyle=k;c.lineWidth=3;c.stroke()}else{c.fillStyle=k;c.fill()}u.txt(t,x+30,y+42,`22px ${F}`,MU);mc.font=`22px ${F}`;x+=50+mc.measureText(t).width})}});
+    },
+    nota(t,cor){const ls=quebra(t,`22px ${F}`,W-2*P);ops.push({h:12+ls.length*32,f:(c,y,u)=>ls.forEach((l,i)=>u.txt(l,P,y+30+i*32,`22px ${F}`,cor||MU))})},
+    vazio(t){ops.push({h:56,f:(c,y,u)=>u.txt(t,P+8,y+36,`24px ${F}`,MU)})},
+    esp(h){ops.push({h,f:()=>{}})}
+  };
+  return R;
+}
+function exportaRel(R,titulo,arq,zap){
+  const{W,P,F,SL,LN}=R,T=coresTema(),cab=290,rod=110;
+  const H=cab+soma(R.ops,o=>o.h)+rod;
+  const cv=document.createElement('canvas');cv.width=W;cv.height=H;const c=cv.getContext('2d');
+  const u={
+    txt:(t,x,y,font,cor,al)=>{c.font=font;c.fillStyle=cor;c.textAlign=al||'left';c.fillText(t,x,y)},
+    corte:(t,max,font)=>{t=String(t);c.font=font;if(c.measureText(t).width<=max)return t;while(t.length&&c.measureText(t+'…').width>max)t=t.slice(0,-1);return t+'…'},
+    rr:(x,y,w,h,r,cor)=>{c.fillStyle=cor;c.beginPath();c.moveTo(x+r,y);c.arcTo(x+w,y,x+w,y+h,r);c.arcTo(x+w,y+h,x,y+h,r);c.arcTo(x,y+h,x,y,r);c.arcTo(x,y,x+w,y,r);c.closePath();c.fill()},
+    hr:(y,l)=>{c.strokeStyle=LN;c.lineWidth=l||2;c.beginPath();c.moveTo(P,y);c.lineTo(W-P,y);c.stroke()}
+  };
+  c.fillStyle='#f3ecdc';c.fillRect(0,0,W,H);
+  c.fillStyle=T.c1;c.fillRect(0,0,W,250);c.fillStyle=T.c2;c.fillRect(0,250,W,10);
+  if(logoImg.complete&&logoImg.naturalWidth){const lh=200,lw=lh*logoImg.naturalWidth/logoImg.naturalHeight;c.drawImage(logoImg,P-10,25,lw,lh)}
+  const tx=P+200;u.txt(NOME,tx,105,`64px ${SL}`,T.tx);u.txt(SUB.toUpperCase(),tx,150,`bold 30px ${F}`,T.tx);
+  u.txt(u.corte(titulo,W-tx-P,`38px ${SL}`),tx,212,`38px ${SL}`,T.hi);
+  let y=cab;R.ops.forEach(o=>{o.f(c,y,u);y+=o.h});
+  u.txt('Gerado em '+dataBR(hoje()),W/2,H-44,`24px ${F}`,R.MU,'center');
+  exportaCanvas(cv,arq,titulo,zap);
+}
+const MesCap=m=>{const t=nomeMes(m);return t.charAt(0).toUpperCase()+t.slice(1)};
+function statusPag(j,m){
+  const hm=ym(hoje());if(m>hm)return 'fut';
+  const c=cfgMes(m),t=tipoMes(j,m);
+  if(t==='mensalista'){
+    if(DB.receitas.some(r=>r.tipo==='mensalidade'&&r.jogadorId===j.id&&r.competencia===m))return 'ok';
+    if(j.ativo===false||!deveMes(j,m)||!(c.mensalidade>0))return 'na';
+    return hoje()>`${m}-${p2(c.vencimento)}`?'dv':'av';
+  }
+  return t==='isento'?'is':'na';
+}
+function relDevedores(R,m){
+  const dev=agrupaDev(m);
+  R.sec(`Quem está devendo · ${dev.length}`);
+  if(!dev.length)return R.vazio('Ninguém devendo nesse mês.');
+  dev.forEach(g=>R.linha(g.j.apelido||g.j.nome,g.itens.map(x=>(x.tipo==='mensalidade'?'Mensalidade '+nomeMesC(x.venc.slice(0,7)):'Diária '+dataBR(x.p.data).slice(0,5))+(x.atrasado?' (atrasada)':' (a vencer)')).join(' · '),brl(g.total),R.BAD));
+  R.sub('Total a receber',brl(soma(dev,g=>g.total)),R.BAD);
+}
+function fotoFin(){
+  const m=S.mes,k=S.fin||'geral',R=novoRel();
+  if(k==='geral'){
+    const rs=receitasMes(m),ds=despesasMes(m),ent=soma(rs,r=>r.valor),sai=soma(ds,x=>x.valor),saldo=saldoAte(m),dev=agrupaDev(m);
+    R.kpis([['Saldo em caixa',brl(saldo),saldo<0?R.BAD:R.OK],['Resultado do mês',brl(ent-sai),ent-sai<0?R.BAD:R.OK],['Entrou',brl(ent),R.OK],['Saiu',brl(sai),R.BAD],['A receber',brl(soma(dev,g=>g.total)),dev.length?R.BAD:R.TX],['Devendo',dev.length+' jogador'+(dev.length===1?'':'es')]]);
+    R.sec('Entradas por tipo');
+    const tp=[['mensalidade','Mensalidades'],['diaria','Diárias'],['avulsa','Avulsas']].map(([t,l])=>[l,rs.filter(r=>r.tipo===t)]).filter(x=>x[1].length);
+    tp.length?tp.forEach(([l,a])=>R.linha(l,a.length+' lançamento'+(a.length===1?'':'s'),brl(soma(a,r=>r.valor)),R.OK)):R.vazio('Nada recebido no mês.');
+    R.sec('Saídas por categoria');
+    const cats={};ds.forEach(x=>(cats[x.d.categoria]=cats[x.d.categoria]||[]).push(x));
+    const ca=Object.entries(cats).sort((a,b)=>soma(b[1],x=>x.valor)-soma(a[1],x=>x.valor));
+    ca.length?ca.forEach(([l,a])=>R.linha(l,a.map(x=>x.d.descricao||x.d.categoria).join(' · '),brl(soma(a,x=>x.valor)),R.BAD)):R.vazio('Nada saiu no mês.');
+    relDevedores(R,m);
+    const y=m.slice(0,4),hm=ym(hoje());let tE=0,tD=0;
+    R.sec(`Ano de ${y}`);
+    const X={m:R.P+12,e:560,d:760,r:R.W-R.P-12};
+    R.tabela([{t:'MÊS',x:X.m},{t:'ENTROU',x:X.e,al:'right'},{t:'SAIU',x:X.d,al:'right'},{t:'RESULTADO',x:X.r,al:'right'}],
+      mesesAno(y).filter(x=>x<=hm&&x>=primeiroMes()).map(x=>{const e=soma(receitasMes(x),r=>r.valor),d=soma(despesasMes(x),z=>z.valor);tE+=e;tD+=d;
+        return{fundo:x===m?'#f6e0c8':null,c:[{v:MesCap(x),b:x===m},{v:brl(e),cor:R.OK},{v:brl(d),cor:R.BAD},{v:brl(e-d),cor:e-d<0?R.BAD:R.OK,b:true}]}}));
+    R.sub(`Total ${y}${y===hm.slice(0,4)?' até hoje':''}: ${brl(tE)} − ${brl(tD)}`,brl(tE-tD),tE-tD<0?R.BAD:R.OK);
+    exportaRel(R,`Finanças · ${MesCap(m)}`,`financas-${m}`,`*${NOME} · Finanças ${nomeMes(m)}*\n\nEntrou: ${brl(ent)}\nSaiu: ${brl(sai)}\nResultado do mês: ${brl(ent-sai)}\n*Saldo em caixa: ${brl(saldo)}*\nA receber: ${brl(soma(dev,g=>g.total))}`);
+  }else if(k==='receitas'){
+    const rs=receitasMes(m).sort((a,b)=>a.data.localeCompare(b.data)),c=cfgMes(m),t=x=>soma(rs.filter(r=>r.tipo===x),r=>r.valor);
+    R.kpis([['Entrou no mês',brl(soma(rs,r=>r.valor)),R.OK],['Lançamentos',String(rs.length)],['Mensalidades',brl(t('mensalidade'))],['Diárias',brl(t('diaria'))],['Avulsas',brl(t('avulsa'))],['Valores do mês',`${brl(c.mensalidade)} / ${brl(c.diaria)}`]]);
+    R.nota(`Mensalidade ${brl(c.mensalidade)} (vence dia ${c.vencimento}) · diária ${brl(c.diaria)}.`);
+    [['mensalidade','Mensalidades recebidas'],['diaria','Diárias recebidas'],['avulsa','Receitas avulsas']].forEach(([tp,tit])=>{
+      const a=rs.filter(r=>r.tipo===tp);R.sec(`${tit} · ${a.length}`);
+      if(!a.length)return R.vazio('Nenhuma.');
+      a.forEach(r=>{const[l,b]=labelRec(r);R.linha(tp==='avulsa'?l:nomeJ(r.jogadorId),(tp==='mensalidade'?l+' · ':tp==='diaria'?'pelada '+dataBR(r.data)+' · ':'')+'recebido '+dataBR(r.data),brl(r.valor),R.OK)});
+      R.sub('Subtotal',brl(soma(a,r=>r.valor)),R.OK);
+    });
+    relDevedores(R,m);
+    exportaRel(R,`Receitas · ${MesCap(m)}`,`receitas-${m}`,`*${NOME} · Receitas ${nomeMes(m)}*\n\nMensalidades: ${brl(t('mensalidade'))}\nDiárias: ${brl(t('diaria'))}\nAvulsas: ${brl(t('avulsa'))}\n*Total: ${brl(soma(rs,r=>r.valor))}*`);
+  }else if(k==='despesas'){
+    const ds=despesasMes(m).sort((a,b)=>a.dt.localeCompare(b.dt)),tot=soma(ds,x=>x.valor);
+    const cats={};ds.forEach(x=>cats[x.d.categoria]=(cats[x.d.categoria]||0)+x.valor);
+    R.kpis([['Saiu no mês',brl(tot),R.BAD],['Lançamentos',String(ds.length)]]);
+    R.sec('Por categoria');
+    const ca=Object.entries(cats).sort((a,b)=>b[1]-a[1]);ca.length?ca.forEach(([l,v])=>R.linha(l,null,brl(v),R.BAD)):R.vazio('Nada lançado.');
+    R.sec('Dia a dia');
+    const dias={};ds.forEach(x=>(dias[x.dt]=dias[x.dt]||[]).push(x));
+    const tl={avista:'à vista',parcelada:'parcela',recorrente:'recorrente'};
+    Object.entries(dias).forEach(([dt,a])=>{R.sub(`${['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'][new Date(dt+'T12:00:00').getDay()]}, ${dataBR(dt)}`,brl(soma(a,x=>x.valor)),R.BAD);
+      a.forEach(x=>R.linha(x.d.descricao||x.d.categoria,`${x.d.categoria} · ${x.d.tipo==='parcelada'?x.lab:tl[x.d.tipo]}${x.d.peladaId?' · despesa da pelada':''}`,brl(x.valor),R.BAD))});
+    if(!ds.length)R.vazio('Nada lançado nesse mês.');
+    const fx=DB.despesas.filter(d=>d.tipo!=='avista');
+    if(fx.length){R.sec('Fixas e parceladas');fx.forEach(d=>{const v=d.tipo==='recorrente'?(lastBy(d.vigencias,m)||d.vigencias[d.vigencias.length-1]).valor:d.valor/d.parcelas;
+      R.linha(d.descricao||d.categoria,d.tipo==='recorrente'?`${d.categoria} · recorrente${d.fim?' até '+nomeMesC(d.fim):''}`:`${d.categoria} · ${d.parcelas}x · 1ª em ${nomeMesC(ym(d.data))}`,brl(v)+(d.tipo==='recorrente'?'/mês':'/parc.'),R.TX)})}
+    R.sub('Total do mês',brl(tot),R.BAD);
+    exportaRel(R,`Despesas · ${MesCap(m)}`,`despesas-${m}`,`*${NOME} · Despesas ${nomeMes(m)}*\n\n`+ca.map(([l,v])=>`${l}: ${brl(v)}`).join('\n')+`\n\n*Total: ${brl(tot)}*`);
+  }else{
+    const y=S.pgAno||ym(hoje()).slice(0,4),hm=ym(hoje()),ms=mesesAno(y);
+    const jogs=DB.jogadores.filter(j=>ms.some(x=>x<=hm&&tipoMes(j,x)==='mensalista'&&(!j.entrada||x>=ym(j.entrada)))).sort(byNome);
+    let pago=0,aberto=0,nDev=0;
+    const linhas=jogs.map(j=>{const cels=ms.map(x=>statusPag(j,x));let d=0;cels.forEach((st,i)=>{const v=cfgMes(ms[i]).mensalidade;if(st==='ok'){const r=DB.receitas.find(r=>r.tipo==='mensalidade'&&r.jogadorId===j.id&&r.competencia===ms[i]);pago+=r?+r.valor:v}if(st==='dv'){aberto+=v;d+=v}});if(d)nDev++;
+      return{nome:j.apelido||j.nome,sub:d?'deve '+brl(d):(tipoMes(j,hm)==='isento'?'isento':tipoMes(j,hm)!=='mensalista'?'saiu':'em dia'),cels,d}});
+    R.kpis([['Mensalidades pagas',brl(pago),R.OK],['Em aberto',brl(aberto),aberto?R.BAD:R.TX],['Mensalistas',String(jogs.length)],['Devendo',String(nDev),nDev?R.BAD:R.TX]]);
+    R.sec(`Mensalidades ${y}`);
+    jogs.length?R.grade(ms,linhas):R.vazio('Nenhum mensalista nesse ano.');
+    const dev=linhas.filter(l=>l.d).sort((a,b)=>b.d-a.d);
+    if(dev.length){R.sec('Em aberto por jogador');dev.forEach(l=>R.linha(l.nome,ms.filter((x,i)=>l.cels[i]==='dv').map(nomeMesC).join(' · '),brl(l.d),R.BAD));R.sub('Total em aberto',brl(aberto),R.BAD)}
+    R.nota('Só mensalistas. Diárias aparecem na lista de devedores do mês.');
+    exportaRel(R,`Mensalidades ${y}`,`mensalidades-${y}`,`*${NOME} · Mensalidades ${y}*\n\nPagas: ${brl(pago)}\nEm aberto: ${brl(aberto)}`+(dev.length?'\n\n'+dev.map(l=>`${l.nome}: ${brl(l.d)}`).join('\n'):''));
+  }
 }
 function vFinGeral(){
   const m=S.mes,rs=receitasMes(m),ds=despesasMes(m);
