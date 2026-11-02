@@ -67,6 +67,8 @@ header h1 small{display:block;font-family:system-ui,sans-serif;font-size:11px;le
 .plb{width:34px;height:34px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--tx);font-size:16px;cursor:pointer}
 .plb:disabled{opacity:.3}
 .plb.x{color:var(--bad)}
+.pl.fora .pli,.pl.fora .pln{opacity:.5}.plfora{display:block;font-size:11px;font-weight:700;color:var(--bad)}
+.time div.mv{cursor:pointer;border-radius:6px}.time div.mv:active{background:var(--pri2)}
 .filasep{background:var(--pri2);color:var(--pri);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;text-align:center;padding:4px}
 .radio{flex:1;display:flex;flex-direction:column;align-items:flex-start;gap:2px;margin:0;padding:10px;border:1px solid var(--line);border-radius:10px;color:var(--tx);font-size:15px;cursor:pointer}
 .radio input{width:auto;margin:0 0 4px}
@@ -75,6 +77,7 @@ header h1 small{display:block;font-family:system-ui,sans-serif;font-size:11px;le
 .radio:has(input:checked){border-color:var(--pri);background:var(--pri2)}
 .time.jogo{outline:2px solid var(--pri)}
 .time .inc{font-size:11px;color:var(--bad);font-family:system-ui,sans-serif}
+.dbadge{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:6px;background:var(--warn2);color:var(--warn);font-style:normal;font-weight:800;font-size:13px;vertical-align:-3px}.dbadge.is{background:var(--tag);color:var(--tagtx)}
 .dtag{font-size:10px;background:var(--warn2);color:var(--warn);border-radius:6px;padding:0 4px;font-weight:700}
 .placar{display:grid;grid-template-columns:1fr auto 1fr;align-items:start;text-align:center;gap:6px}
 .pl-nome{font-family:'Alfa Slab One',Georgia,serif;font-size:16px}
@@ -318,7 +321,7 @@ async function load(){
     Object.keys(DB).forEach(k=>DB[k]=[]);
     data.forEach(r=>DB[r.colecao]&&DB[r.colecao].push(r.dados));
     // times e jogos ficam num registro separado (o juiz só grava esse)
-    DB.partidas.forEach(pt=>{const p=DB.peladas.find(x=>x.id===pt.pid);if(p){p.times=pt.times||[];p.jogos=pt.jogos||[];if(Array.isArray(pt.presentes))p.presentes=pt.presentes}});
+    DB.partidas.forEach(pt=>{const p=DB.peladas.find(x=>x.id===pt.pid);if(p){p.times=pt.times||[];p.jogos=pt.jogos||[];if(Array.isArray(pt.presentes))p.presentes=pt.presentes;if(pt.fora)p.fora=pt.fora}});
   }else{
     try{const s=localStorage.getItem(LS);if(s)DB=Object.assign(DB,JSON.parse(s))}catch(e){}
   }
@@ -334,7 +337,7 @@ async function put(col,obj){
     if(col==='peladas'){
       const{times,jogos,...base}=obj;
       if(isAdmin){const r=await sb.from('docs').upsert({id:obj.id,colecao:'peladas',dados:base});erro=r.error}
-      if(!erro&&(isAdmin||isJuiz)){const r=await sb.from('docs').upsert({id:'pt_'+obj.id,colecao:'partidas',dados:{id:'pt_'+obj.id,pid:obj.id,presentes:obj.presentes||[],times:times||[],jogos:jogos||[]}});erro=r.error}
+      if(!erro&&(isAdmin||isJuiz)){const r=await sb.from('docs').upsert({id:'pt_'+obj.id,colecao:'partidas',dados:{id:'pt_'+obj.id,pid:obj.id,presentes:obj.presentes||[],fora:obj.fora||{},times:times||[],jogos:jogos||[]}});erro=r.error}
     }else if(isJuiz&&col==='jogadores'){const r=await sb.from('docs').insert({id:obj.id,colecao:col,dados:obj});erro=r.error}
     else{const r=await sb.from('docs').upsert({id:obj.id,colecao:col,dados:obj});erro=r.error}
     if(erro)avisa('Erro ao salvar: '+erro.message);
@@ -641,9 +644,12 @@ function sorteiaLista(a){
 function montaTimes(p){
   const m=ym(p.data),n=porTime(),N=2*n;
   const linha=(p.presentes||[]).filter(k=>!ehGoleiro(k));
-  const diar=k=>{const j=jog(k);return j&&tipoMes(j,m)==='diarista'};
-  const ordem=[...linha.filter(k=>!diar(k)),...linha.filter(diar)];
-  const prim=shuffle(ordem.slice(0,N)),resto=shuffle(ordem.slice(N));
+  // sorteio só entre os N primeiros mensalistas (na ordem de chegada); se faltar, completa com quem chegou depois
+  const mens=k=>{const j=jog(k);return !!j&&!ehAvulso(j,m)};
+  let base=linha.filter(mens).slice(0,N);
+  if(base.length<N)base=base.concat(linha.filter(k=>!base.includes(k)).slice(0,N-base.length));
+  // do 3º time em diante: ordem de chegada, sem sorteio
+  const prim=shuffle(base),resto=linha.filter(k=>!base.includes(k));
   const h=Math.ceil(prim.length/2),times=[prim.slice(0,h),prim.slice(h)].filter(t=>t.length);
   for(let i=0;i<resto.length;i+=n)times.push(resto.slice(i,i+n));
   return times;
@@ -683,10 +689,10 @@ async function salvaNovaPelada(){
 function vPeladaDet(){
   const p=curP();if(!p){S.peladaId=null;return vPelada()}
   const m=ym(p.data),pres=p.presentes||[],c=cfgMes(m),canc=p.status==='cancelada';
-  const ativos=DB.jogadores.filter(j=>j.ativo!==false||pres.includes(j.id)).sort(byNome);
+  const ativos=DB.jogadores.filter(j=>(j.ativo!==false&&!ehAvulso(j,m))||pres.includes(j.id)).sort(byNome);
   const faltam=ativos.filter(j=>!pres.includes(j.id));
   const NQ=naQuadra();
-    const presLista=pres.map((id,i)=>`<div class="pl"><span class="pln">${i+1}º</span><span class="pli">${ehGoleiro(id)?'🧤':'👟'} ${esc(nomeJ(id))}${jog(id)&&jog(id).convidadoPor?`<small class="plc">conv. ${esc(nomeJ(jog(id).convidadoPor))}</small>`:''}</span>${podeLista(p)?`<button class="plb" ${i?'':'disabled'} onclick="sobePres(${i})" aria-label="Subir">↑</button><button class="plb x" onclick="togPres('${id}')" aria-label="Tirar">✕</button>`:''}</div>`).join('');
+    const presLista=pres.map((id,i)=>`<div class="pl${(p.fora||{})[id]?' fora':''}"><span class="pln">${i+1}º</span><span class="pli">${icoLista(id,m)} ${esc(nomeJ(id))}${jog(id)&&jog(id).convidadoPor?`<small class="plc">conv. ${esc(nomeJ(jog(id).convidadoPor))}</small>`:''}${(p.fora||{})[id]?`<small class="plfora">${FORA[(p.fora||{})[id]]}</small>`:''}</span>${podeLista(p)?`<button class="plb" ${i?'':'disabled'} onclick="sobePres(${i})" aria-label="Subir">↑</button><button class="plb" onclick="menuPres('${id}')" aria-label="Opções">⋯</button>`:''}</div>`).join('');
   const st=id=>(p.stats||{})[id]||{};
   const stp=(id,k)=>isAdmin?`<div class="step"><button onclick="step('${id}','${k}',-1)">−</button><b>${st(id)[k]||0}</b><button onclick="step('${id}','${k}',1)">+</button></div>`:`<b style="text-align:center">${st(id)[k]||0}</b>`;
   const statsRows=pres.map(id=>`<div class="pst"><b>${ehGoleiro(id)?'🧤 ':'👟 '}${esc(nomeJ(id))}</b><div class="st4">${[['g','⚽'],['ca','🟨'],['cz','🟦'],['cv','🟥']].map(([k,ic])=>`<div class="stc"><span>${ic}</span>${stp(id,k)}</div>`).join('')}</div></div>`).join('');
@@ -716,11 +722,12 @@ function cardSorteioDia(p){
   const n=porTime(),pres=p.presentes||[],gols=pres.filter(ehGoleiro),m=ym(p.data);
   const r=p.times&&p.times.length?p.times:null;
   const diar=k=>{const j=jog(k);return j&&tipoMes(j,m)==='diarista'};
-  const time=(t,i)=>`<div class="time${i<2?' jogo':''}"><b>Time ${i+1}${t.length<n?` <small class="inc">${t.length}/${n}</small>`:''}</b>${t.map(k=>`<div>👟 ${esc(nomeJ(k))}${diar(k)?' <small class="dtag">D</small>':''}</div>`).join('')}</div>`;
+  const ed=podeLista(p);
+  const time=(t,i)=>`<div class="time${i<2?' jogo':''}"><b>Time ${i+1}${t.length<n?` <small class="inc">${t.length}/${n}</small>`:''}</b>${t.map(k=>`<div${ed?` class="mv" onclick="editaTime(${i},'${k}')"`:''}>👟 ${esc(nomeJ(k))}${diar(k)?' <small class="dtag">D</small>':''}${ed?' <small class="empty" style="padding:0">✎</small>':''}</div>`).join('')}</div>`;
   return `<div class="card"><h3>🎲 Sorteio dos times</h3>
-  <div class="empty" style="padding:0 0 8px;font-size:13px">Times 1 e 2 começam com os ${2*n} primeiros da lista, <b>mensalistas na frente dos diaristas</b>. O resto vira os próximos times. Goleiros não entram. Depois do sorteio os times ficam fixos; quem chega depois vai pra lista de espera e completa os times.</div>
+  <div class="empty" style="padding:0 0 8px;font-size:13px">O sorteio é só entre os <b>${2*n} primeiros mensalistas</b> da lista: eles formam os Times 1 e 2. Do Time 3 em diante, segue a <b>ordem de chegada</b>, sem sorteio. Quem chegar depois do sorteio entra sozinho no próximo time que ainda não jogou. Goleiros não entram.</div>
   ${podeLista(p)?`<button class="btn" style="width:100%" onclick="sortearDia()">${r?'🔄 Sortear de novo':'🎲 Sortear times'}</button>`:(r?'':'<div class="empty">Aguardando o sorteio dos times.</div>')}
-  ${r?`<div class="times">${r.map(time).join('')}</div>${r.length>2?'<p class="empty" style="margin:8px 0 0;font-size:12px">Times 1 e 2 começam jogando. Os outros entram na ordem.</p>':''}`:''}
+  ${r&&podeLista(p)?'<p class="empty" style="margin:8px 0 0;font-size:12px">✎ Toque num jogador pra trocar ou mover de time.</p>':''}${r?`<div class="times">${r.map(time).join('')}</div>${r.length>2?'<p class="empty" style="margin:8px 0 0;font-size:12px">Times 1 e 2 começam jogando. Os outros entram na ordem.</p>':''}`:''}
   ${r&&listaEspera(p).length?`<p class="empty" style="margin-bottom:0"><b>⏳ Lista de espera:</b> ${listaEspera(p).map((k,i)=>`${i+1}. ${esc(nomeJ(k))}`).join(' · ')}</p>`:''}
   ${r&&podeLista(p)&&listaEspera(p).length>=n?`<button class="btn sec sm" style="width:100%;margin-top:8px" onclick="formaTime()">➕ Formar Time ${r.length+1} com a lista de espera</button>`:''}
   ${gols.length?`<p class="empty" style="margin-bottom:0"><b>🧤 Goleiros:</b> ${gols.map(k=>esc(nomeJ(k))).join(' · ')}</p>`:''}</div>`;
@@ -782,7 +789,7 @@ function escolheJogo(){
 function confNovoJogo(){const a=+val('njA'),b=+val('njB');if(a===b)return avisa('Escolha dois times diferentes.');fecha();novoJogo(a,b)}
 // quem saiu machucado hoje (e não voltou depois)
 function machucados(p){
-  const m=new Set();(p.jogos||[]).forEach(j=>(j.ev||[]).forEach(e=>{if(e.t==='sub'){if(e.entra)m.delete(e.entra);if(e.motivo==='machucou')m.add(e.sai)}}));return m;
+  const m=new Set();const fim=()=>Object.keys(p.fora||{}).forEach(k=>m.add(k));(p.jogos||[]).forEach(j=>(j.ev||[]).forEach(e=>{if(e.t==='sub'){if(e.entra)m.delete(e.entra);if(e.motivo==='machucou')m.add(e.sai)}}));fim();return m;
 }
 // lista de espera: presentes de linha que não estão em nenhum time (quem chegou depois e quem saiu cansado)
 // ordem: quem chegou depois (ordem de chegada) e, no fim, quem saiu cansado (na ordem em que saiu)
@@ -998,7 +1005,7 @@ setInterval(()=>{
 
 function formDiar(){
   const p=curP(),cv=(p.presentes||[]).map(jog).filter(j=>j&&tipoMes(j,ym(p.data))!=='diarista');
-  const outros=DB.jogadores.filter(j=>j.ativo!==false&&tipoMes(j,ym(p.data))!=='diarista'&&!cv.includes(j)).sort(byNome);
+  const outros=DB.jogadores.filter(j=>j.ativo!==false&&!ehAvulso(j,ym(p.data))&&!cv.includes(j)).sort(byNome);
   const opt=j=>`<option value="${j.id}">${esc(j.apelido||j.nome)}</option>`;
   const c=cfgMes(ym(p.data));
   modal(`<h3>+ Diarista</h3><p class="empty" style="margin-top:0">Entra na lista de chegada desta pelada.</p>
@@ -1021,23 +1028,69 @@ async function salvaDiar(){
   }
   const p=curP(),op=(document.querySelector('input[name=dPos]:checked')||{}).value||'jogador';
   const pos=op==='goleiro'?'goleiro':'jogador';
-  const j={id:uid(),nome,apelido:nome,pos,ativo:true,entrada:p.data,convidadoPor:val('dConv')||null,
+  const j={id:uid(),nome,apelido:nome,pos,ativo:true,avulso:true,entrada:p.data,convidadoPor:val('dConv')||null,
     tipos:[{desde:ym(p.data),tipo:op==='jogador'?'diarista':'isento'}]};
   await put('jogadores',j);fecha();await addPres(j.id);
 }
 async function formaTime(){const p=curP(),f=listaEspera(p).slice(0,porTime());p.times.push(f);await put('peladas',p);render()}
 function encaixaNoTime(p,id){
-  if(!p.times||!p.times.length||ehGoleiro(id))return;
-  const n=porTime(),ult=p.times[p.times.length-1];
-  // completa o último time se ele ainda não jogou; senão forma um time novo no fim da fila
-  const jaJogou=(p.jogos||[]).some(j=>j.a.t===p.times.length-1||j.b.t===p.times.length-1);
-  if(ult.length<n&&!jaJogou)ult.push(id);else p.times.push([id]);
+  if(!p.times||!p.times.length||ehGoleiro(id)||p.times.some(t=>t.includes(id)))return;
+  const n=porTime(),jogou=t=>(p.jogos||[]).some(j=>j.a.t===t||j.b.t===t);
+  // quem chega depois do sorteio entra no primeiro time incompleto que ainda não jogou; senão abre um time novo no fim da fila
+  const t=p.times.findIndex((x,i)=>x.length<n&&!jogou(i));
+  if(t>=0)p.times[t].push(id);else p.times.push([id]);
 }
 async function addPres(id){
   if(!id)return;const p=curP();p.presentes=p.presentes||[];if(p.presentes.includes(id))return;
   p.presentes.push(id);
+  if(p.times&&p.times.length)encaixaNoTime(p,id);
   render();await put('peladas',p);
   const el=document.getElementById('addPres');if(el)el.focus();
+}
+// diarista / convidado: só existe na pelada do dia (não é jogador fixo do grupo)
+function ehAvulso(j,m){if(!j)return false;const t=tipoMes(j,m);return t==='diarista'||!!j.avulso||(t==='isento'&&!!j.convidadoPor)}
+// ícone na lista: 🧤 goleiro · D diarista (convidado isento também) · 👟 mensalista
+function icoLista(id,m){
+  if(ehGoleiro(id))return '🧤';
+  const j=jog(id),t=j?tipoMes(j,m):'';
+  if(t==='diarista')return '<i class="dbadge" title="diarista">D</i>';
+  if(ehAvulso(j,m))return '<i class="dbadge is" title="convidado isento">D</i>';
+  return '👟';
+}
+const FORA={cansou:'😮‍💨 cansou · fora dos próximos times',machucou:'🤕 machucou · fora dos próximos times',embora:'🚪 foi embora'};
+// tira o jogador dos times; só apaga time vazio se for o último e ainda não jogou (não bagunça a numeração)
+function tiraDosTimes(p,id){
+  if(!p.times)return;p.times=p.times.map(t=>t.filter(x=>x!==id));
+  const jogou=t=>(p.jogos||[]).some(j=>j.a.t===t||j.b.t===t);
+  while(p.times.length&&!p.times[p.times.length-1].length&&!jogou(p.times.length-1))p.times.pop();
+}
+async function menuPres(id){
+  const p=curP(),f=(p.fora||{})[id],nm=nomeJ(id);
+  const bt=f?[['✅ Voltou a jogar','','volta']]:[['😮‍💨 Cansou','sec','cansou'],['🤕 Machucou','sec','machucou'],['🚪 Foi embora','sec','embora']];
+  const op=await dialogo(`${nm}${f?' · '+FORA[f]:''}`,[...bt,['✕ Tirar da lista (chegou por engano)','bad','tirar'],['Cancelar','ghost',null]],true);
+  if(!op)return;
+  if(op==='tirar')return togPres(id);
+  p.fora=p.fora||{};
+  if(op==='volta'){delete p.fora[id];encaixaNoTime(p,id)}
+  else{p.fora[id]=op;tiraDosTimes(p,id)}
+  render();await put('peladas',p);
+}
+// editar times à mão: mover ou trocar um jogador
+async function editaTime(ti,id){
+  const p=curP(),T=p.times,n=porTime(),nm=nomeJ(id);
+  const outros=T.map((t,i)=>i).filter(i=>i!==ti);
+  const op=await dialogo(`${nm} · Time ${ti+1}`,[['🔄 Trocar com alguém de outro time','','troca'],...outros.map(i=>[`➡️ Mover para o Time ${i+1} (${T[i].length}/${n})`,'sec','m'+i]),['⏸ Tirar do time (fica na espera)','sec','espera'],['Cancelar','ghost',null]],true);
+  if(!op)return;
+  if(op==='troca'){
+    const cands=outros.flatMap(i=>T[i].map(k=>[i,k]));
+    if(!cands.length)return avisa('Não tem ninguém em outro time.');
+    const o=await dialogo(`Trocar ${nm} (Time ${ti+1}) com:`,[...cands.map(([i,k])=>[`${nomeJ(k)} · Time ${i+1}`,'sec',i+'|'+k]),['Cancelar','ghost',null]],true);
+    if(!o)return;const[i2,k2]=[+o.split('|')[0],o.split('|').slice(1).join('|')];
+    T[ti][T[ti].indexOf(id)]=k2;T[i2][T[i2].indexOf(k2)]=id;
+  }else if(op==='espera'){tiraDosTimes(p,id)}
+  else{const d=+op.slice(1);if(T[d].length>=n&&!await confirma(`O Time ${d+1} já tem ${n}. Mover mesmo assim?`,'Mover'))return;T[ti]=T[ti].filter(x=>x!==id);T[d].push(id);
+    const jogou=t=>(p.jogos||[]).some(j=>j.a.t===t||j.b.t===t);while(T.length&&!T[T.length-1].length&&!jogou(T.length-1))T.pop()}
+  render();await put('peladas',p);
 }
 async function sobePres(i){
   const p=curP(),a=p.presentes;if(!a||i<1)return;[a[i-1],a[i]]=[a[i],a[i-1]];
@@ -1048,7 +1101,7 @@ async function togPres(id){
   const i=p.presentes.indexOf(id);
   if(i>=0){const s=p.stats[id];if(s&&(s.g||s.ca||s.cz||s.cv)&&!await confirma('Esse jogador tem gols/cartões lançados. Tirar mesmo assim?'))return;p.presentes.splice(i,1);delete p.stats[id]}
   else p.presentes.push(id);
-  if(i>=0&&p.times)p.times=p.times.map(t=>t.filter(x=>x!==id)).filter(t=>t.length);
+  if(i>=0){tiraDosTimes(p,id);if(p.fora)delete p.fora[id]}
   render();await put('peladas',p);
 }
 async function step(id,k,d){const p=curP();p.stats=p.stats||{};const s=p.stats[id]=p.stats[id]||{};s[k]=Math.max(0,(s[k]||0)+d);render();await put('peladas',p)}
@@ -1084,20 +1137,21 @@ async function excluiPelada(){
 function vJog(){
   const m=ym(hoje()),rk=ranking(null);
   const ord=(a,b)=>(a.ativo===false)-(b.ativo===false)||byNome(a,b);
-  const mens=DB.jogadores.filter(j=>tipoMes(j,m)==='mensalista').sort(ord);
-  const ise=DB.jogadores.filter(j=>tipoMes(j,m)==='isento').sort(ord);
-  const nDiar=DB.jogadores.filter(j=>tipoMes(j,m)==='diarista').length;
+  // só 2 listas: jogadores mensalistas (isento de linha fixo entra aqui com etiqueta) e goleiros isentos
+  const mens=DB.jogadores.filter(j=>!ehAvulso(j,m)&&(tipoMes(j,m)==='mensalista'||(tipoMes(j,m)==='isento'&&j.pos!=='goleiro'))).sort(ord);
+  const ise=DB.jogadores.filter(j=>!ehAvulso(j,m)&&tipoMes(j,m)==='isento'&&j.pos==='goleiro').sort(ord);
+  const nDiar=DB.jogadores.filter(j=>ehAvulso(j,m)).length;
   const pl=(n,u,v)=>`${n} ${n===1?u:v}`;
   const row=j=>{const s=rk.find(x=>x.id===j.id)||novoSt();
-    return `<div class="it click" onclick="detJog('${j.id}')"><div><b>${j.pos==='goleiro'?'🧤 ':'👟 '}${esc(j.apelido||j.nome)}</b><small>${pl(s.g,'gol','gols')} · ${pl(s.pr,'presença','presenças')} · ${pl(totCart(s),'cartão','cartões')}</small></div><div class="row">${j.ativo===false?'<span class="tag b">inativo</span>':''}<span class="empty">›</span></div></div>`};
+    return `<div class="it click" onclick="detJog('${j.id}')"><div><b>${j.pos==='goleiro'?'🧤 ':'👟 '}${esc(j.apelido||j.nome)}</b><small>${pl(s.g,'gol','gols')} · ${pl(s.pr,'presença','presenças')} · ${pl(totCart(s),'cartão','cartões')}</small></div><div class="row">${tipoMes(j,m)==='isento'&&j.pos!=='goleiro'?'<span class="tag">isento</span>':''}${j.ativo===false?'<span class="tag b">inativo</span>':''}<span class="empty">›</span></div></div>`};
   return `<button class="btn big adm" onclick="formJog(null,false,'mensalista')">+ Add Jogador</button>
-  <div class="card"><h3>Mensalistas · ${mens.filter(j=>j.ativo!==false).length}</h3><div class="list">${mens.map(row).join('')||'<div class="empty">Nenhum mensalista cadastrado.</div>'}</div></div>
-  ${ise.length?`<div class="card"><h3>Isentos · ${ise.filter(j=>j.ativo!==false).length}</h3><div class="empty" style="padding:0 0 6px;font-size:12px">Jogam sem pagar mensalidade nem diária.</div><div class="list">${ise.map(row).join('')}</div></div>`:''}
-  ${nDiar?`<button class="btn ghost sm" style="width:100%" onclick="listaDiar()">Diaristas cadastrados (${nDiar}) ›</button>`:''}`;
+  <div class="card"><h3>👟 Jogadores mensalistas · ${mens.filter(j=>j.ativo!==false).length}</h3><div class="list">${mens.map(row).join('')||'<div class="empty">Nenhum mensalista cadastrado.</div>'}</div></div>
+  <div class="card"><h3>🧤 Goleiros isentos · ${ise.filter(j=>j.ativo!==false).length}</h3><div class="list">${ise.map(row).join('')||'<div class="empty">Nenhum goleiro cadastrado.</div>'}</div></div>
+  ${nDiar?`<p style="text-align:center;margin:4px 0 0"><a href="#" class="empty" style="font-size:12px" onclick="listaDiar();return false">ver diaristas que já vieram (${nDiar})</a></p>`:''}`;
 }
 function listaDiar(){
-  const m=ym(hoje()),ds=DB.jogadores.filter(j=>tipoMes(j,m)==='diarista').sort(byNome);
-  modal(`<h3>Diaristas</h3><p class="empty" style="margin-top:0">Cadastrados pela tela da pelada. Toque para ver ou editar.</p>
+  const m=ym(hoje()),ds=DB.jogadores.filter(j=>ehAvulso(j,m)).sort(byNome);
+  modal(`<h3>Diaristas e convidados</h3><p class="empty" style="margin-top:0">Não são jogadores fixos: só entram na pelada do dia, pelo botão <b>+ Diarista</b>. Ficam aqui só pra guardar os gols, cartões e diárias. Se algum virar mensalista, abra e mude o tipo.</p>
   <div class="list">${ds.map(j=>`<div class="it click" onclick="detJog('${j.id}')"><b>${j.pos==='goleiro'?'🧤 ':'👟 '}${esc(j.apelido||j.nome)}</b>${j.ativo===false?'<span class="tag b">inativo</span>':'<span class="empty">›</span>'}</div>`).join('')}</div>
   <button class="btn ghost" style="margin-top:16px;width:100%" onclick="fecha()">Fechar</button>`);
 }
